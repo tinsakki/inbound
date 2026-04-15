@@ -1,0 +1,14 @@
+# Virtual Environment
+freshbus/
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Database Files
+*.sqlite3
+*.db
+backend/database.db
+
+# macOS System Files
+.DS_Store

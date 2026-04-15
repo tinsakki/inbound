@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inbound Metrics Tracker</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-logo">
+                    <i data-lucide="bus-front" class="brand-icon"></i>
+                </div>
+                <h2 style="font-size: 1.1rem; line-height: 1.2;">Inbound Metrics Tracker</h2>
+            </div>
+            
+            <p class="nav-label">MAIN</p>
+            <nav class="side-nav">
+                <a href="#" class="nav-item active">
+                    <i data-lucide="layout-dashboard"></i> 
+                    <span>Overview</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <i data-lucide="bar-chart-2"></i> 
+                    <span>Reports</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <i data-lucide="users"></i> 
+                    <span>Agent Ops</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-bottom">
+                <a href="#" class="nav-item">
+                    <i data-lucide="settings"></i> 
+                    <span>Settings</span>
+                </a>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Top Header -->
+            <header class="topbar">
+                <div class="search-wrapper">
+                    <i data-lucide="search" class="search-icon"></i>
+                    <input type="text" id="globalSearch" placeholder="Search across metrics, dates, or files...">
+                </div>
+                <div class="user-profile">
+                    <button class="btn-icon"><i data-lucide="bell"></i></button>
+                    <div class="divider"></div>
+                    <div class="avatar-circle">
+                        <i data-lucide="user"></i>
+                    </div>
+                    <div class="user-details">
+                        <span class="user-name">Executive Admin</span>
+                        <span class="user-role">Operations</span>
+                    </div>
+                </div>
+            </header>
+
+            <div class="content-wrapper">
+                <div class="page-headline" style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2.5rem;">
+                    <div>
+                        <h1>Call Center Intelligence</h1>
+                        <p>Real-time analytics and automated daily data pipelines. Expand filters below to drill down.</p>
+                    </div>
+                    <button id="wipeDataBtn" class="btn-execute" style="width: auto; padding: 0.8rem 1.5rem; background: linear-gradient(45deg, #ef4444, #991b1b); font-size: 0.9rem;">
+                        <i data-lucide="trash-2" style="width: 16px;"></i> Wipe Database
+                    </button>
+                </div>
+
+                <!-- Advanced Filters Panel -->
+                <div class="glass-panel filter-panel" style="margin-bottom: 2.5rem;">
+                    <div class="panel-header" style="margin-bottom: 1rem;">
+                        <h2><i data-lucide="filter" style="width: 18px; margin-right: 0.5rem; vertical-align: middle;"></i> Advanced Data Flow Filters</h2>
+                        <div style="display: flex; gap: 0.8rem;">
+                            <button type="submit" form="filterForm" id="applyFiltersBtn" class="btn-execute" style="width: auto; padding: 0.3rem 1rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; margin: 0;">Apply Filters</button>
+                            <button type="button" id="clearFiltersBtn" class="btn-icon-small" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600;">Clear Filters</button>
+                        </div>
+                    </div>
+                    <form id="filterForm" class="filter-grid">
+                        <div class="filter-group"><label>Agent</label><select id="filter_agent" name="agent"><option value="">All Agents</option></select></div>
+                        <div class="filter-group"><label>Campaign</label><select id="filter_campaign" name="campaign"><option value="">All Campaigns</option></select></div>
+                        <div class="filter-group"><label>Status</label><select id="filter_status" name="status"><option value="">All Statuses</option></select></div>
+                        <div class="filter-group"><label>Disposition</label><select id="filter_disposition" name="disposition"><option value="">All Dispositions</option></select></div>
+                        <div class="filter-group"><label>Hangup By</label><select id="filter_hangup_by" name="hangup_by"><option value="">All</option><option value="AgentHangup">Agent</option><option value="UserHangup">User</option></select></div>
+                        
+                        <div class="filter-group"><label>DID</label><input type="text" id="filter_did" name="did" placeholder="Filter by DID..."></div>
+                        <div class="filter-group"><label>Ring Time</label><input type="text" id="filter_ring_time" name="customer_ring_time" placeholder="00:00:10"></div>
+                        <div class="filter-group"><label>Time to Answer</label><input type="text" id="filter_tta" name="time_to_answer" placeholder="00:00:13"></div>
+                        <div class="filter-group"><label>Duration</label><input type="text" id="filter_duration" name="duration" placeholder="00:01:45"></div>
+                        <div class="filter-group"><label>Hold Time</label><input type="text" id="filter_hold_time" name="hold_time" placeholder="00:00:00"></div>
+                        <div class="filter-group"><label>Wrapup Duration</label><input type="text" id="filter_wrapup" name="wrapup_duration" placeholder="00:00:20"></div>
+                        <div class="filter-group"><label>Transfer Details</label><input type="text" id="filter_transfer" name="transfer_details" placeholder="Transfer details..."></div>
+                    </form>
+                </div>
+
+                <!-- KPI Summary Cards -->
+                <div class="kpi-grid">
+                    <div class="kpi-card glass">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Total Calls Offered</span>
+                            <div class="icon-wrapper blue"><i data-lucide="phone-incoming"></i></div>
+                        </div>
+                        <div class="kpi-value">
+                            <span id="kpiTotalCalls" class="counter">--</span>
+                        </div>
+                        <div class="kpi-trend positive">
+                            <i data-lucide="trending-up"></i>
+                            <span>Aggregated over datasets</span>
+                        </div>
+                    </div>
+                    
+                    <div class="kpi-card glass">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Agent Calls Offered</span>
+                            <div class="icon-wrapper purple"><i data-lucide="headset"></i></div>
+                        </div>
+                        <div class="kpi-value">
+                            <span id="kpiAgentCalls" class="counter">--</span>
+                        </div>
+                        <div class="kpi-trend">
+                            <span>Excludes blank/unassigned</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Calls Answered</span>
+                            <div class="icon-wrapper green"><i data-lucide="check-circle-2"></i></div>
+                        </div>
+                        <div class="kpi-value">
+                            <span id="kpiCallsAnswered" class="counter">--</span>
+                        </div>
+                        <div class="kpi-trend positive">
+                            <span id="kpiAnswerRate">--% Answer Rate</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass">
+                        <div class="kpi-header">
+                            <span class="kpi-title">SL Calls</span>
+                            <div class="icon-wrapper" style="background: rgba(236, 72, 153, 0.1); color: #ec4899;"><i data-lucide="timer"></i></div>
+                        </div>
+                        <div class="kpi-value">
+                            <span id="kpiSlCalls" class="counter">--</span>
+                        </div>
+                        <div class="kpi-trend positive">
+                            <span>Answered within SLA</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass">
+                        <div class="kpi-header">
+                            <span class="kpi-title">WH Total Calls Offered</span>
+                            <div class="icon-wrapper" style="background: rgba(14, 165, 233, 0.1); color: #0ea5e9;"><i data-lucide="heart-handshake"></i></div>
+                        </div>
+                        <div class="kpi-value">
+                            <span id="kpiWhCalls" class="counter">--</span>
+                        </div>
+                        <div class="kpi-trend positive">
+                            <span id="kpiWhAnswered">-- WH Total Calls Answered</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Overall Abn</span>
+                            <div class="icon-wrapper" style="background: rgba(239, 68, 68, 0.1); color: #ef4444;"><i data-lucide="phone-missed"></i></div>
+                        </div>
+                        <div class="kpi-value">
+                            <span id="kpiOverallAbn" class="counter">--</span>
+                        </div>
+                        <div class="kpi-trend">
+                            <span style="color: #ef4444;">Total dropped globally</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Net Abandoned Calls</span>
+                            <div class="icon-wrapper" style="background: rgba(249, 115, 22, 0.1); color: #f97316;"><i data-lucide="phone-off"></i></div>
+                        </div>
+                        <div class="kpi-value">
+                            <span id="kpiNetAbn" class="counter">--</span>
+                        </div>
+                        <div class="kpi-trend">
+                            <span>Lasted > 5 seconds</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass">
+                        <div class="kpi-header">
+                            <span class="kpi-title">Short Call Abn</span>
+                            <div class="icon-wrapper" style="background: rgba(168, 85, 247, 0.1); color: #a855f7;"><i data-lucide="clock"></i></div>
+                        </div>
+                        <div class="kpi-value">
+                            <span id="kpiShortAbn" class="counter">--</span>
+                        </div>
+                        <div class="kpi-trend">
+                            <span id="kpiShortPct">-- Short Call % - Abn</span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-card glass" style="grid-column: span 3; text-align: center;">
+                        <div class="kpi-header" style="justify-content: center; margin-bottom: 0.5rem;">
+                            <span class="kpi-title">Gross Abn%(WO Short Calls)</span>
+                        </div>
+                        <div class="kpi-value" style="font-size: 3.5rem; color: #ef4444;">
+                            <span id="kpiGrossPct" class="counter">--</span>%
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-grid">
+                    <!-- Automated Pipeline Dropzone -->
+                    <div class="glass-panel upload-panel">
+                        <div class="panel-header">
+                            <h2>Data Processing Engine</h2>
+                            <button class="btn-icon-small" title="Help"><i data-lucide="info"></i></button>
+                        </div>
+                        <form id="uploadForm" class="upload-zone">
+                            <input type="file" id="file" name="file" accept=".csv, .xlsx, .xls" hidden required>
+                            
+                            <div class="drop-area glass-interactive" id="dropArea">
+                                <div class="upload-icon-pulse">
+                                    <i data-lucide="upload-cloud"></i>
+                                </div>
+                                <h3 class="gradient-text">Deploy Dataset</h3>
+                                <p>Drag and drop your daily report here, or click to browse.</p>
+                                <div class="format-tags">
+                                    <span class="tag">.CSV</span>
+                                    <span class="tag">.XLSX</span>
+                                </div>
+                            </div>
+                            
+                            <div class="file-state" id="fileState" style="display: none;">
+                                <div class="file-info-card">
+                                    <i data-lucide="file-spreadsheet" class="file-icon"></i>
+                                    <div class="file-details">
+                                        <span id="fileName" class="filename">report.csv</span>
+                                        <span id="fileSize" class="filesize">Ready to process</span>
+                                    </div>
+                                    <button type="button" class="btn-icon-small remove-file" id="removeFileBtn"><i data-lucide="x"></i></button>
+                                </div>
+                                <button type="submit" id="submitBtn" class="btn-execute">
+                                    <span>Compile Insights</span>
+                                    <i data-lucide="zap"></i>
+                                </button>
+                            </div>
+                            
+                            <div id="statusMessage" class="status-alert"></div>
+                        </form>
+                    </div>
+
+                    <!-- Volume Analysis Chart -->
+                    <div class="glass-panel chart-panel">
+                        <div class="panel-header">
+                            <h2>Call Volume Trajectory</h2>
+                            <div class="chart-controls">
+                                <span class="badge">Aggregate View</span>
+                            </div>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="metricsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ledger Table -->
+                <div class="glass-panel table-panel">
+                    <div class="panel-header">
+                        <h2>Historical Compute Ledger</h2>
+                    </div>
+                    <div class="table-responsive">
+                        <table id="metricsTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Metric Category</th>
+                                    <th>Value</th>
+                                    <th>Execution Source</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <tr><td colspan="5" class="table-loading">Initializing Engine...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Initialize Iconography
+        lucide.createIcons();
+    </script>
+    <script src="/script.js"></script>
+</body>
+</html>
