@@ -4,8 +4,7 @@ from fastapi.staticfiles import StaticFiles
 
 import models
 from database import engine
-from routers import upload, metrics
-
+from routers import sync, metrics
 import os
 
 # Create the database tables
@@ -22,7 +21,7 @@ app.add_middleware(
 )
 
 # Include API Routers
-app.include_router(upload.router)
+app.include_router(sync.router)
 app.include_router(metrics.router)
 
 # Mount static files for simple HTML/JS frontend

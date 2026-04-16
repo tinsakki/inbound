@@ -1,186 +1,208 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- UI Elements ---
-    const dropArea = document.getElementById('dropArea');
-    const fileInput = document.getElementById('file');
-    const fileState = document.getElementById('fileState');
-    const fileName = document.getElementById('fileName');
-    const fileSize = document.getElementById('fileSize');
-    const removeFileBtn = document.getElementById('removeFileBtn');
-    const uploadForm = document.getElementById('uploadForm');
-    const statusMessage = document.getElementById('statusMessage');
-    const submitBtn = document.getElementById('submitBtn');
-    
-    // Filters
-    const filterForm = document.getElementById('filterForm');
-    const clearFiltersBtn = document.getElementById('clearFiltersBtn');
-    
     // --- Global State ---
     let volumeChart = null;
-    let loadingTimeout;
+    let distChart = null;
+    let lastDashboardData = null;
+    let currentViewType = 'daily';
+    let currentDistType = 'dispositions';
 
-    // --- Drag and Drop Logic ---
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        if(dropArea) dropArea.addEventListener(eventName, preventDefaults, false);
-    });
+    // Theme Elements
+    const themeToggle = document.getElementById('themeToggle');
+    const themeIcon = document.getElementById('themeIcon');
 
-    function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+    // --- Tab Controller (Executive KPI Layers) ---
+    const initTabs = () => {
+        const tabs = document.querySelectorAll('.kpi-tab[data-group]');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const group = tab.getAttribute('data-group');
+                // Update buttons
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                // Update visibility
+                document.querySelectorAll('.metric-group').forEach(g => g.classList.remove('active'));
+                document.getElementById(`group-${group}`).classList.add('active');
+            });
+        });
 
-    ['dragenter', 'dragover'].forEach(eventName => {
-        if(dropArea) dropArea.addEventListener(eventName, () => dropArea.classList.add('dragover'), false);
-    });
-
-    ['dragleave', 'drop'].forEach(eventName => {
-        if(dropArea) dropArea.addEventListener(eventName, () => dropArea.classList.remove('dragover'), false);
-    });
-
-    if(dropArea) dropArea.addEventListener('drop', (e) => {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        if (files.length > 0) {
-            handleFile(files[0]);
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(files[0]);
-            fileInput.files = dataTransfer.files;
-        }
-    });
-
-    if(dropArea) dropArea.addEventListener('click', () => fileInput.click());
-
-    if(fileInput) fileInput.addEventListener('change', function() {
-        if (this.files.length > 0) {
-            handleFile(this.files[0]);
-        }
-    });
-
-    function handleFile(file) {
-        dropArea.style.display = 'none';
-        fileState.style.display = 'block';
-        fileName.textContent = file.name;
-        fileSize.textContent = (file.size / 1024 / 1024).toFixed(2) + ' MB';
-    }
-
-    if(removeFileBtn) removeFileBtn.addEventListener('click', () => {
-        fileInput.value = '';
-        fileState.style.display = 'none';
-        dropArea.style.display = 'block';
-    });
-
-
-    // --- Advanced Filters Logic ---
-    const initFilterOptions = async () => {
-        try {
-            const res = await fetch('/api/metrics/filters');
-            if(res.ok) {
-                const data = await res.json();
-                populateSelect('filter_agent', data.agents);
-                populateSelect('filter_campaign', data.campaigns);
-                populateSelect('filter_status', data.statuses);
-                populateSelect('filter_disposition', data.dispositions);
-            }
-        } catch(e) { console.error(e); }
-    };
-
-    const populateSelect = (id, options) => {
-        const sel = document.getElementById(id);
-        if(!sel) return;
-        options.forEach(opt => {
-            const el = document.createElement('option');
-            el.value = opt; el.textContent = opt;
-            sel.appendChild(el);
+        // Outcome switcher
+        const distBtns = document.querySelectorAll('.kpi-tab[data-dist]');
+        distBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                distBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentDistType = btn.getAttribute('data-dist');
+                if (lastDashboardData) renderDistChart(lastDashboardData.distributions[currentDistType]);
+            });
         });
     };
 
+    // --- Theme Logic ---
+    const initTheme = () => {
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        if (savedTheme === 'light') {
+            document.body.classList.add('light-mode');
+            if(themeIcon) themeIcon.setAttribute('data-lucide', 'sun');
+        } else {
+            document.body.classList.remove('light-mode');
+            if(themeIcon) themeIcon.setAttribute('data-lucide', 'moon');
+        }
+        lucide.createIcons();
+    };
+
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            const isLight = document.body.classList.toggle('light-mode');
+            localStorage.setItem('theme', isLight ? 'light' : 'dark');
+            if(themeIcon) themeIcon.setAttribute('data-lucide', isLight ? 'sun' : 'moon');
+            lucide.createIcons();
+            if (lastDashboardData) {
+                renderTrajectoryChart(lastDashboardData.chart_data);
+                renderDistChart(lastDashboardData.distributions[currentDistType]);
+            }
+        });
+    }
+
+    // --- Fetch & Data Processing ---
     const fetchMetrics = async () => {
         try {
-            // Build Query Params
             const params = new URLSearchParams();
+            params.append('view_type', currentViewType);
+            params.append('agent_hc', document.getElementById('param_agent_hc').value || 10);
+            params.append('gross_tickets', document.getElementById('param_gross_tickets').value || 0);
+
+            // Add standard filters
+            const filterForm = document.getElementById('filterForm');
             if(filterForm) {
-                new FormData(filterForm).forEach((value, key) => {
-                    if (value.trim() !== '') params.append(key, value.trim());
+                new FormData(filterForm).forEach((v, k) => {
+                    if (v.trim() !== '') params.append(k, v.trim());
                 });
+                // Explicitly add start/end if they exist
+                const start = document.getElementById('filter_start_date').value;
+                const end = document.getElementById('filter_end_date').value;
+                if(start && !params.has('start_date')) params.append('start_date', start);
+                if(end && !params.has('end_date')) params.append('end_date', end);
             }
 
-            const response = await fetch('/api/metrics/aggregate?' + params.toString());
-            if (response.ok) {
-                const data = await response.json();
-                processDashboardData(data);
+            const res = await fetch('/api/metrics/aggregate?' + params.toString());
+            if (res.ok) {
+                const data = await res.json();
+                lastDashboardData = data;
+                processDashboard(data);
             }
-        } catch (error) {
-            console.error('Failed to load dynamic metrics:', error);
+        } catch (e) {
+            console.error('Fetch failed:', e);
         }
     };
 
-    const processDashboardData = (data) => {
-        if (!data || !data.summary) return;
-        const summary = data.summary;
+    const processDashboard = (data) => {
+        const s = data.summary;
+        // Update all metrics IDs
+        const mappings = {
+            'metric-total_offered': s.volume.total_offered,
+            'metric-answered': s.volume.answered,
+            'metric-inbound_wh_offered': s.volume.inbound_wh_offered,
+            'metric-al_pct': s.service.al_pct,
+            'metric-wh_answered': s.volume.wh_answered,
+            'metric-wh_offered': s.volume.wh_offered,
+            'metric-travel_update_offered': s.volume.travel_update_offered,
+            'metric-sl_pct': s.service.sl_pct,
+            'metric-sl_calls': s.service.sl_calls,
+            'metric-avg_wait': s.service.avg_wait,
+            'metric-on_hold': s.service.on_hold,
+            'metric-avg_hold': s.service.avg_hold,
+            'metric-aht': s.efficiency.aht,
+            'metric-call_per_agent': s.efficiency.call_per_agent,
+            'val_agent_hc': document.getElementById('param_agent_hc').value,
+            'metric-same_day_repeat': s.efficiency.same_day_repeat,
+            'metric-repeat_pct': s.efficiency.repeat_pct,
+            'metric-long_calls': s.efficiency.long_calls,
+            'metric-long_call_pct': s.efficiency.long_call_pct,
+            'metric-gross_abn_pct': s.failure.gross_abn_pct,
+            'metric-net_abn': s.failure.net_abn,
+            'metric-net_abn_pct': s.failure.net_abn_pct,
+            'metric-short_abn': s.failure.short_abn,
+            'metric-short_pct': s.failure.short_pct,
+            'metric-queue_level': s.failure.queue_level,
+            'metric-intr_journey_pct': s.journey.intr_journey_pct,
+            'metric-travel_util_pct': s.journey.travel_util_pct,
+            'metric-same_day_disp_repeat': s.journey.same_day_disp_repeat,
+            'metric-disp_repeat_pct': s.journey.disp_repeat_pct,
+            'total_raw_rows': `${data.raw_count.toLocaleString()} records`
+        };
 
-        // Update KPIs with counting animation
-        animateValue("kpiTotalCalls", parseInt(document.getElementById("kpiTotalCalls").textContent.replace(/,/g, '')) || 0, summary['Total Calls Offered'], 800);
-        animateValue("kpiAgentCalls", parseInt(document.getElementById("kpiAgentCalls").textContent.replace(/,/g, '')) || 0, summary['Agent Calls Offered'], 800);
-        animateValue("kpiCallsAnswered", parseInt(document.getElementById("kpiCallsAnswered").textContent.replace(/,/g, '')) || 0, summary['Calls Answered'], 800);
-        
-        animateValue("kpiSlCalls", parseInt(document.getElementById("kpiSlCalls").textContent.replace(/,/g, '')) || 0, summary['SL Calls'], 800);
-        animateValue("kpiWhCalls", parseInt(document.getElementById("kpiWhCalls").textContent.replace(/,/g, '')) || 0, summary['WH Total Calls Offered'], 800);
-        
-        animateValue("kpiOverallAbn", parseInt(document.getElementById("kpiOverallAbn")?.textContent.replace(/,/g, '')) || 0, summary['Overall Abn'], 800);
-        animateValue("kpiNetAbn", parseInt(document.getElementById("kpiNetAbn")?.textContent.replace(/,/g, '')) || 0, summary['Net Abandoned'], 800);
-        animateValue("kpiShortAbn", parseInt(document.getElementById("kpiShortAbn")?.textContent.replace(/,/g, '')) || 0, summary['Short Call Abn'], 800);
-        
-        animateValue("kpiGrossPct", parseFloat(document.getElementById("kpiGrossPct")?.textContent) || 0, summary['Gross Abn %'], 800, true);
+        for (const [id, val] of Object.entries(mappings)) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
+        }
 
-        const answerRate = summary['Total Calls Offered'] > 0 ? ((summary['Calls Answered'] / summary['Total Calls Offered']) * 100).toFixed(1) : 0;
-        document.getElementById("kpiAnswerRate").textContent = `${answerRate}%`;
-        document.getElementById("kpiWhAnswered").textContent = `${summary['WH Calls Answered']} WH Total Calls Answered`;
-        document.getElementById("kpiShortPct").textContent = `${summary['Short Call %']}% Short Call % - Abn`;
-
-        // Populate Raw Status in Table
+        // Ledger Table Placeholder
         const tableBody = document.getElementById('tableBody');
-        tableBody.innerHTML = `
-            <tr>
-                <td><span style="color:var(--text-main); font-weight:500;">Live Query</span></td>
-                <td><span class="badge" style="color:var(--accent-purple)">DWH Engine</span></td>
-                <td style="font-family:monospace; font-size:1.1rem">${data.raw_count.toLocaleString()} rows</td>
-                <td>Active Dataset</td>
-                <td><span class="badge-success">Succeed</span></td>
-            </tr>
-        `;
+        if(tableBody) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td>${new Date().toLocaleDateString()}</td>
+                    <td><span class="badge" style="color:var(--accent-purple)">Aggregated IQ</span></td>
+                    <td style="font-family:monospace">${data.raw_count.toLocaleString()} rows</td>
+                    <td>Central Pipeline</td>
+                    <td><span class="badge-success">Operational</span></td>
+                </tr>
+            `;
+        }
 
-        // Update Chart
-        renderChart(data.chart_data);
+        renderTrajectoryChart(data.chart_data);
+        renderDistChart(data.distributions[currentDistType]);
+        renderHeatmap(data.heatmap);
     };
 
-    function animateValue(id, start, end, duration, floatVals=false) {
-        if (start === end) return;
-        let obj = document.getElementById(id);
-        if(!obj) return;
-        let range = end - start;
-        let current = start;
-        let increment = end > start ? (floatVals ? 0.1 : 1) : (floatVals ? -0.1 : -1);
-        let stepTime = Math.abs(Math.floor(duration / (range/Math.abs(increment))));
-        if (stepTime < 10) stepTime = 10;
+    // --- Heatmap (Pulse Map) ---
+    const renderHeatmap = (heatmapData) => {
+        const container = document.getElementById('heatmap');
+        if (!container) return;
+        container.innerHTML = '';
         
-        let timer = setInterval(function() {
-            current += increment;
-            if ((increment > 0 && current >= end) || (increment < 0 && current <= end)) {
-                current = end;
-                clearInterval(timer);
-            }
-            obj.innerHTML = floatVals ? current.toFixed(2) : Math.floor(current).toLocaleString();
-        }, stepTime);
-    }
+        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        
+        // Find max value for scaling colors
+        const maxVal = Math.max(...heatmapData.flat()) || 1;
 
-    // --- Chart.js Rendering ---
-    const renderChart = (chartData) => {
+        heatmapData.forEach((row, dayIdx) => {
+            const rowEl = document.createElement('div');
+            rowEl.className = 'heatmap-row';
+            
+            const label = document.createElement('div');
+            label.className = 'day-label';
+            label.textContent = days[dayIdx];
+            rowEl.appendChild(label);
+
+            row.forEach((val, hour) => {
+                const cell = document.createElement('div');
+                cell.className = 'heatmap-cell';
+                cell.title = `${days[dayIdx]} ${hour}:00 - ${val} Calls`;
+                
+                // Color intensity (emerald/green for heavy call volume in dark mode)
+                const opacity = (val / maxVal) * 0.9 + 0.1;
+                cell.style.background = `rgba(16, 185, 129, ${opacity})`;
+                if (val === 0) cell.style.background = 'rgba(255,255,255,0.02)';
+                
+                rowEl.appendChild(cell);
+            });
+            container.appendChild(rowEl);
+        });
+    };
+
+    // --- Charting Engine ---
+    const renderTrajectoryChart = (chartData) => {
         const ctx = document.getElementById('metricsChart').getContext('2d');
-        
-        const labels = chartData.map(d => d.call_date);
-        const dataTotal = chartData.map(d => d.total_calls);
-        const dataAnswered = chartData.map(d => d.answered_calls);
-
         if (volumeChart) volumeChart.destroy();
 
-        Chart.defaults.color = '#94a3b8';
-        Chart.defaults.font.family = "'Plus Jakarta Sans', sans-serif";
+        const labels = chartData.map(d => d.label);
+        const dataTotal = chartData.map(d => d.total);
+        const dataAnswered = chartData.map(d => d.answered);
+        const dataAbn = chartData.map(d => d.abn);
+
+        const isLight = document.body.classList.contains('light-mode');
+        const gridColor = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)';
 
         volumeChart = new Chart(ctx, {
             type: 'line',
@@ -188,121 +210,166 @@ document.addEventListener('DOMContentLoaded', () => {
                 labels: labels,
                 datasets: [
                     {
-                        label: 'Total Calls',
+                        label: 'Offered',
                         data: dataTotal,
                         borderColor: '#3b82f6',
                         backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        borderWidth: 3,
-                        pointBackgroundColor: '#05050a',
-                        pointBorderColor: '#3b82f6',
                         fill: true,
-                        tension: 0.4
+                        tension: 0.4,
+                        borderWidth: 3,
+                        pointRadius: 4
                     },
                     {
-                        label: 'Calls Answered',
+                        label: 'Answered',
                         data: dataAnswered,
                         borderColor: '#10b981',
-                        borderWidth: 2,
-                        pointBackgroundColor: '#05050a',
-                        pointBorderColor: '#10b981',
                         borderDash: [5, 5],
-                        tension: 0.4
+                        tension: 0.4,
+                        borderWidth: 2
+                    },
+                    {
+                        label: 'Abandoned',
+                        data: dataAbn,
+                        borderColor: '#f43f5e',
+                        tension: 0.4,
+                        borderWidth: 2
                     }
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 8 } }
-                },
+                plugins: { legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 6 } } },
                 scales: {
-                    x: { grid: { color: 'rgba(255, 255, 255, 0.05)' } },
-                    y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' } }
+                    x: { grid: { color: 'transparent' } },
+                    y: { beginAtZero: true, grid: { color: gridColor } }
                 }
             }
         });
     };
 
-    // --- Upload Action ---
-    if(uploadForm) {
-        uploadForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            statusMessage.className = 'status-alert';
-            statusMessage.textContent = 'Migrating dataset into Warehouse...';
-            statusMessage.style.display = 'block';
-            submitBtn.disabled = true;
+    const renderDistChart = (distData) => {
+        const ctx = document.getElementById('distChart').getContext('2d');
+        if (distChart) distChart.destroy();
 
-            const formData = new FormData(uploadForm);
+        const labels = Object.keys(distData);
+        const values = Object.values(distData);
+
+        distChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: values,
+                    backgroundColor: [
+                        '#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', 
+                        '#f43f5e', '#6366f1', '#ec4899', '#94a3b8'
+                    ],
+                    borderWidth: 0,
+                    hoverOffset: 15
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '70%',
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+    };
+
+    // --- Bootstrapping ---
+    const initFilterOptions = async () => {
+        try {
+            const res = await fetch('/api/metrics/filters');
+            if (res.ok) {
+                const data = await res.json();
+                const populate = (id, options) => {
+                    const sel = document.getElementById(id);
+                    if(!sel) return;
+                    sel.innerHTML = '<option value="">All</option>';
+                    options.forEach(o => {
+                        const el = document.createElement('option');
+                        el.value = o; el.textContent = o;
+                        sel.appendChild(el);
+                    });
+                };
+                populate('filter_agent', data.agents);
+                populate('filter_campaign', data.campaigns);
+                populate('filter_status', data.statuses);
+                populate('filter_disposition', data.dispositions);
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    // Event Listeners
+    document.getElementById('filterForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        fetchMetrics();
+    });
+
+    document.getElementById('clearFiltersBtn')?.addEventListener('click', () => {
+        document.getElementById('filterForm').reset();
+        fetchMetrics();
+    });
+
+    document.querySelectorAll('.view-btn[data-view]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.view-btn[data-view]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentViewType = btn.getAttribute('data-view');
+            fetchMetrics();
+        });
+    });
+
+    // Ops Params Auto-Refresh
+    ['param_agent_hc', 'param_gross_tickets'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', fetchMetrics);
+    });
+
+    // Manual Upload Logic
+    const fileInput = document.getElementById('manual_upload');
+    const uploadStatus = document.getElementById('upload_status');
+
+    if (fileInput) {
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            uploadStatus.innerHTML = '<i data-lucide="refresh-cw" class="spin" style="width:12px"></i> Ingesting...';
+            lucide.createIcons();
 
             try {
-                const response = await fetch('/api/upload/', {
+                const res = await fetch('/api/sync/upload', {
                     method: 'POST',
                     body: formData
                 });
-                const result = await response.json();
-
-                if (response.ok) {
-                    statusMessage.className = 'status-alert success';
-                    statusMessage.textContent = `Migration complete. Loaded ${result.metrics_saved} dynamic records.`;
-                    
-                    setTimeout(() => {
-                        removeFileBtn.click();
-                        statusMessage.style.display = 'none';
-                    }, 3000);
-
-                    initFilterOptions(); // Refresh dropdowns
-                    fetchMetrics(); // Force Refresh metrics
+                
+                const data = await res.json();
+                if (res.ok) {
+                    uploadStatus.innerHTML = `<span style="color:var(--accent-emerald)">✅ Integrated ${data.new_records_integrated} records</span>`;
+                    fetchMetrics();
                 } else {
-                    statusMessage.className = 'status-alert error';
-                    statusMessage.textContent = result.detail || 'An error occurred';
+                    uploadStatus.innerHTML = `<span style="color:var(--accent-rose)">❌ ${data.detail || 'Upload failed'}</span>`;
                 }
-            } catch (error) {
-                statusMessage.className = 'status-alert error';
-                statusMessage.textContent = 'Connection compromised. Re-establishing link...';
-            } finally {
-                submitBtn.disabled = false;
+            } catch (e) {
+                console.error('Upload error:', e);
+                uploadStatus.innerHTML = '<span style="color:var(--accent-rose)">❌ Connection error</span>';
             }
+
+            // Reset input so same file can be uploaded again if needed
+            fileInput.value = '';
         });
     }
 
-    // Manual Trigger for Filters via Apply Button
-    if(filterForm) {
-        filterForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            fetchMetrics();
-        });
-    }
-
-    if(clearFiltersBtn) {
-        clearFiltersBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            filterForm.reset();
-            fetchMetrics();
-        });
-    }
-
-    const wipeDataBtn = document.getElementById('wipeDataBtn');
-    if (wipeDataBtn) {
-        wipeDataBtn.addEventListener('click', async () => {
-            if (confirm("WARNING: Are you sure you want to permanently delete ALL uploaded spreadsheet data natively stored in the Data Warehouse? This cannot be undone.")) {
-                try {
-                    const res = await fetch('/api/upload/clear', { method: 'DELETE' });
-                    if (res.ok) {
-                        fetchMetrics();
-                        initFilterOptions();
-                    } else {
-                        alert("Failed to wipe database.");
-                    }
-                } catch (e) {
-                    console.error("Error wiping database", e);
-                }
-            }
-        });
-    }
-
-    // Initial Bootstrap
+    initTheme();
+    initTabs();
     initFilterOptions();
     fetchMetrics();
 });
+

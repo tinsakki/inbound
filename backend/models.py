@@ -14,6 +14,9 @@ class CallRecord(Base):
     __tablename__ = "call_records"
     id = Column(Integer, primary_key=True, index=True)
     
+    # Unique identifier to prevent double counting
+    row_hash = Column(String, unique=True, index=True)
+    
     Call_ID = Column(String, index=True)
     Call_Type = Column(String)
     Campaign = Column(String, index=True)
@@ -51,3 +54,11 @@ class CallRecord(Base):
     Rating_Comments = Column(String)
     DynamicDid = Column(String)
     DID = Column(String, index=True)
+
+class ProcessedSync(Base):
+    __tablename__ = "processed_syncs"
+    id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(String, unique=True, index=True) # Google Drive File ID
+    filename = Column(String)
+    record_count = Column(Integer)
+    synced_at = Column(DateTime(timezone=True), server_default=func.now())
