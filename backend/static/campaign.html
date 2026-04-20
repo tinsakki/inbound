@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreshBus Ops Intelligence - Hub</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div id="campaignView" class="view-screen active">
+    <div class="login-bg-orb orb-1"></div>
+    <div class="login-bg-orb orb-2"></div>
+
+    <div class="hub-wrapper">
+        <header class="hub-header">
+            <div class="hub-brand">
+                <div class="login-logo" style="width:36px;height:36px;">
+                    <i data-lucide="bus-front"></i>
+                </div>
+                <span>FreshBus Ops Intelligence</span>
+            </div>
+            <div class="hub-header-right">
+                <span class="hub-greeting">Welcome, <strong id="hubUserName">Admin</strong></span>
+                <button id="logoutBtn" class="hub-logout-btn">
+                    <i data-lucide="log-out"></i> Logout
+                </button>
+            </div>
+        </header>
+
+        <div class="hub-content">
+            <div class="hub-headline">
+                <h1>Campaign Intelligence Hub</h1>
+                <p>Select a campaign to view real-time analytics and performance metrics.</p>
+            </div>
+
+            <div class="campaign-grid">
+                <!-- DYNAMIC CAMPAIGNS PLACEMENT -->
+                <div id="dynamicCampaignCards" style="display: contents;"></div>
+
+                <!-- ADD CAMPAIGN (Dashed Card) -->
+                <div class="campaign-card" id="openConfigBtn" style="border: 2px dashed rgba(255,255,255,0.15); background: transparent; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; min-height: 220px; box-shadow: none; transition: all 0.2s; opacity: 0.8;">
+                    <div style="width: 64px; height: 64px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; transition: background 0.2s;">
+                        <i data-lucide="plus" style="width: 32px; height: 32px; color: var(--text-muted);"></i>
+                    </div>
+                    <h3 style="color: var(--text-main); font-size: 1.1rem; margin-bottom: 0.5rem;">Add New Mapping</h3>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; padding: 0 1rem;">Configure new OzoneTel Sub-Campaigns for data syncing.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         ADD CAMPAIGN CONFIGURATION MODAL
+    ═══════════════════════════════════════════════════════ -->
+    <div id="campaignModalOverlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); z-index: 100; align-items: center; justify-content: center;">
+        <div class="login-card" style="margin: 1rem; width: 100%; max-width: 500px; padding: 2rem; box-shadow: 0 25px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 class="login-title" style="font-size: 1.2rem;">Add Campaign Mapping</h2>
+                <button id="closeConfigBtn" style="background: none; border: none; color: var(--text-muted); cursor: pointer; display: flex;"><i data-lucide="x"></i></button>
+            </div>
+            
+            <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem;">
+                <p style="color: var(--accent-amber); font-size: 0.8rem; line-height: 1.5; margin: 0; display: flex; gap: 0.5rem; align-items: flex-start;">
+                    <i data-lucide="alert-triangle" style="flex-shrink: 0; width: 16px; height: 16px; margin-top: 2px;"></i>
+                    <span><strong>Disclaimer:</strong> Please provide the exact name because this will go in the API and it is case sensitive. All these campaign names will get added to the .env for now, but we will create a separate table for that in the future.</span>
+                </p>
+            </div>
+
+            <form id="campaignConfigForm" class="login-form">
+                <div class="login-field">
+                    <label>Parent Group Name</label>
+                    <div class="login-input-wrap">
+                        <i data-lucide="folder" class="login-input-icon"></i>
+                        <input type="text" id="campaignGroupName" placeholder="e.g. Inbound, Outbound" required style="font-size: 0.85rem;">
+                    </div>
+                </div>
+
+                <div class="login-field">
+                    <label>Short Description (Optional)</label>
+                    <div class="login-input-wrap">
+                        <i data-lucide="align-left" class="login-input-icon"></i>
+                        <input type="text" id="campaignGroupDesc" placeholder="e.g. Customer support and main lines." style="font-size: 0.85rem;">
+                    </div>
+                </div>
+
+                <div class="login-field">
+                    <label>OzoneTel Sub-Campaigns</label>
+                    <div class="login-input-wrap" style="align-items: flex-start;">
+                        <i data-lucide="layers" class="login-input-icon" style="margin-top: 10px;"></i>
+                        <textarea id="ozonetelNamesInput" placeholder="e.g. Inbound_CC_WomenHelpLine, Inbound_CC_TravelUpdate (Comma Separated)" required style="font-size: 0.85rem; width: 100%; border: none; background: transparent; padding: 0.85rem 1rem 0.85rem 2.8rem; color: var(--text-main); font-family: var(--font-body); resize: vertical; min-height: 80px;"></textarea>
+                    </div>
+                </div>
+
+                <div id="campaignConfigError" class="login-error" style="display:none; margin-top: 0.5rem;">
+                    <i data-lucide="alert-circle" style="width: 16px; height: 16px;"></i>
+                    <span id="campaignConfigErrorText" style="font-size: 0.8rem;"></span>
+                </div>
+                
+                <div id="campaignConfigSuccess" style="display:none; align-items:center; gap: 0.5rem; color: var(--accent-emerald); background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); padding: 0.6rem 0.9rem; border-radius: 8px; margin-top: 0.5rem;">
+                    <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+                    <span style="font-size: 0.8rem;">Added successfully! The syncer will pick this up automatically.</span>
+                </div>
+
+                <button type="submit" class="login-btn" id="saveCampaignBtn" style="margin-top: 1rem;">
+                    <i data-lucide="save" style="width: 16px; height: 16px;"></i> Save Campaigns
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Initialize Icons
+    lucide.createIcons();
+</script>
+<script src="/script.js"></script>
+</body>
+</html>

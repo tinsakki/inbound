@@ -4,8 +4,9 @@ from sqlalchemy import select, func
 from typing import Optional
 import pandas as pd
 
-from database import get_db, engine
+from database import get_tenant_db_engine, get_master_db
 import models
+from sqlalchemy.orm import sessionmaker
 
 router = APIRouter(
     prefix="/api/metrics",
@@ -37,14 +38,30 @@ def read_aggregated_metrics(
     agent_hc: int = Query(10), # Manual Entry placeholder
     gross_tickets: int = Query(0), # Manual Entry placeholder
     view_type: str = Query("daily"),
-    db: Session = Depends(get_db)
+    parent_campaign: str = Query(..., description="The parent campaign name (tenant DB)")
 ):
-    query = db.query(models.CallRecord)
+    engine = get_tenant_db_engine(parent_campaign)
+    TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = TenantSessionLocal()
+    
+    try:
+        query = db.query(models.CallRecord)
 
-    # Load dataset to Pandas
-    df = pd.read_sql(query.statement, engine)
-    if df.empty:
-        return {"summary": {}, "chart_data": [], "distributions": {}, "heatmap_data": []}
+        # Load dataset to Pandas
+        df = pd.read_sql(query.statement, engine)
+        if df.empty:
+            return {
+                "summary": {
+                    "volume": {"total_offered":0,"agent_offered":0,"answered":0,"wh_offered":0,"wh_answered":0,"travel_update_offered":0,"inbound_wh_offered":0},
+                    "service": {"sl_calls":0,"sl_pct":0,"al_pct":0,"avg_wait":0,"on_hold":0,"avg_hold":0},
+                    "efficiency": {"aht":0,"long_calls":0,"long_call_pct":0,"call_per_agent":0,"same_day_repeat":0,"repeat_pct":0},
+                    "failure": {"overall_abn":0,"net_abn":0,"net_abn_pct":0,"short_abn":0,"short_pct":0,"gross_abn_pct":0,"queue_level":0},
+                    "journey": {"intr_journey_pct":0,"travel_util_pct":0,"same_day_disp_repeat":0,"disp_repeat_pct":0}
+                },
+                "chart_data": [], "distributions": {}, "heatmap": [], "raw_count": 0
+            }
+    finally:
+        db.close()
 
     # --- ROBUST NORMALIZATION ---
     # Convert all object columns to lowercase and strip whitespace
@@ -59,11 +76,30 @@ def read_aggregated_metrics(
     df['Call_Date_DT'] = pd.to_datetime(df['Call_Date'], format='%d-%m-%Y', errors='coerce')
     df = df.dropna(subset=['Call_Date_DT'])
 
-    # Apply date range filtering
-    if start_date:
-        df = df[df['Call_Date_DT'] >= pd.to_datetime(start_date)]
-    if end_date:
-        df = df[df['Call_Date_DT'] <= pd.to_datetime(end_date)]
+    # --- DEFAULT DATE INTELLIGENCE ---
+    # We want "Today" for Daily, but if Today is empty, fall back to the Latest Day found.
+    # Weekly and Monthly should show the trailing windows.
+    latest_db_date = df['Call_Date_DT'].max()
+    current_today = pd.Timestamp.now().normalize()
+    
+    if not start_date and not end_date:
+        if view_type.lower() == "daily":
+            # Focus on today, fallback to latest available day in DB
+            if (df['Call_Date_DT'] == current_today).any():
+                df = df[df['Call_Date_DT'] == current_today]
+            else:
+                df = df[df['Call_Date_DT'] == latest_db_date]
+        elif view_type.lower() == "weekly":
+            df = df[df['Call_Date_DT'] >= (current_today - pd.Timedelta(days=7))]
+        elif view_type.lower() == "monthly":
+            df = df[df['Call_Date_DT'] >= (current_today - pd.Timedelta(days=30))]
+    else:
+        # Respect explicit filters from Calendar
+        if start_date:
+            df = df[df['Call_Date_DT'] >= pd.to_datetime(start_date, errors='coerce')]
+        if end_date:
+            df = df[df['Call_Date_DT'] <= pd.to_datetime(end_date, errors='coerce')]
+
 
     # Apply other filters
     if agent: df = df[df['Agent'] == agent.lower().strip()]
@@ -72,7 +108,16 @@ def read_aggregated_metrics(
     if status: df = df[df['Status'] == status.lower().strip()]
 
     if df.empty:
-        return {"summary": {}, "chart_data": [], "distributions": {}, "heatmap_data": []}
+        return {
+            "summary": {
+                "volume": {"total_offered":0,"agent_offered":0,"answered":0,"wh_offered":0,"wh_answered":0,"travel_update_offered":0,"inbound_wh_offered":0},
+                "service": {"sl_calls":0,"sl_pct":0,"al_pct":0,"avg_wait":0,"on_hold":0,"avg_hold":0},
+                "efficiency": {"aht":0,"long_calls":0,"long_call_pct":0,"call_per_agent":0,"same_day_repeat":0,"repeat_pct":0},
+                "failure": {"overall_abn":0,"net_abn":0,"net_abn_pct":0,"short_abn":0,"short_pct":0,"gross_abn_pct":0,"queue_level":0},
+                "journey": {"intr_journey_pct":0,"travel_util_pct":0,"same_day_disp_repeat":0,"disp_repeat_pct":0}
+            },
+            "chart_data": [], "distributions": {}, "heatmap": [], "raw_count": 0
+        }
 
     # Time Normalization (convert to seconds)
     df['TTA_Sec'] = df['Time_to_Answer'].apply(parse_time_to_seconds)
@@ -151,17 +196,19 @@ def read_aggregated_metrics(
 
     # --- HEATMAP DATA (Day vs Hour) ---
     # Need to extract Hour from Start_Time
-    df['Hour'] = pd.to_datetime(df['Start_Time'], format='%H:%M:%S', errors='coerce').dt.hour
+    # Resilient Hour parsing (supports HH:MM:SS or full ISO timestamps)
+    df['Hour'] = pd.to_datetime(df['Start_Time'], errors='coerce').dt.hour
     df['DayOfWeek'] = df['Call_Date_DT'].dt.dayofweek # 0=Mon, 6=Sun
     
-    heatmap_raw = df.groupby(['DayOfWeek', 'Hour']).size().unstack(fill_value=0)
-    # Ensure all days (0-6) and hours (0-23) are present
-    for i in range(7):
-        if i not in heatmap_raw.index: heatmap_raw.loc[i] = 0
-    for j in range(24):
-        if j not in heatmap_raw.columns: heatmap_raw[j] = 0
+    # Optimized Grid Generation for 7x24 Heatmap
+    heatmap_grid = pd.DataFrame(0, index=range(7), columns=range(24))
+    if not df.empty:
+        counts = df.groupby(['DayOfWeek', 'Hour']).size()
+        for (day, hour), val in counts.items():
+            if pd.notna(day) and pd.notna(hour):
+                heatmap_grid.at[int(day), int(hour)] = int(val)
     
-    heatmap_data = heatmap_raw.sort_index().sort_index(axis=1).values.tolist()
+    heatmap_data = heatmap_grid.values.tolist()
 
     # --- TIME SERIES CHART DATA ---
     chart_data = []
@@ -231,41 +278,52 @@ def read_aggregated_metrics(
 def get_filter_options(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
+    parent_campaign: str = Query(..., description="The parent campaign name (tenant DB)")
 ):
-    query = db.query(models.CallRecord)
+    engine = get_tenant_db_engine(parent_campaign)
+    TenantSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = TenantSessionLocal()
     
-    # If a date range is provided, pre-filter the options to show only relevant ones
-    # We'll use Pandas for consistent date logic across the app
-    if start_date or end_date:
-        df = pd.read_sql(query.statement, engine)
-        if not df.empty and 'Call_Date' in df.columns:
-            df['Call_Date_DT'] = pd.to_datetime(df['Call_Date'], format='%d-%m-%Y', errors='coerce')
-            if start_date:
-                df = df[df['Call_Date_DT'] >= pd.to_datetime(start_date)]
-            if end_date:
-                df = df[df['Call_Date_DT'] <= pd.to_datetime(end_date)]
+    try:
+        query = db.query(models.CallRecord)
         
-        agents = [a for a in df['Agent'].unique() if a]
-        campaigns = [c for c in df['Campaign'].unique() if c]
-        statuses = [s for s in df['Status'].unique() if s]
-        
-        disp_counts = df['Disposition'].value_counts()
-        top_10 = disp_counts.head(10).index.tolist()
-        all_dispositions = disp_counts.index.tolist()
-    else:
-        # Fallback to distinct query if no date range
-        agents = [r[0] for r in db.query(models.CallRecord.Agent).distinct().all() if r[0]]
-        campaigns = [r[0] for r in db.query(models.CallRecord.Campaign).distinct().all() if r[0]]
-        statuses = [r[0] for r in db.query(models.CallRecord.Status).distinct().all() if r[0]]
-        
-        disp_query = db.query(models.CallRecord.Disposition, func.count(models.CallRecord.Disposition))\
-                       .group_by(models.CallRecord.Disposition)\
-                       .order_by(func.count(models.CallRecord.Disposition).desc())\
-                       .all()
-        top_10 = [r[0] for r in disp_query[:10] if r[0]]
-        all_dispositions = [r[0] for r in disp_query if r[0]]
+        # If a date range is provided, pre-filter the options to show only relevant ones
+        if start_date or end_date:
+            df = pd.read_sql(query.statement, engine)
+            if not df.empty and 'Call_Date' in df.columns:
+                df['Call_Date_DT'] = pd.to_datetime(df['Call_Date'], format='%d-%m-%Y', errors='coerce')
+                if start_date:
+                    df = df[df['Call_Date_DT'] >= pd.to_datetime(start_date)]
+                if end_date:
+                    df = df[df['Call_Date_DT'] <= pd.to_datetime(end_date)]
+            
+            agents = [a for a in df['Agent'].unique() if a] if not df.empty else []
+            campaigns = [c for c in df['Campaign'].unique() if c] if not df.empty else []
+            statuses = [s for s in df['Status'].unique() if s] if not df.empty else []
+            
+            if not df.empty:
+                disp_counts = df['Disposition'].value_counts()
+                top_10 = disp_counts.head(10).index.tolist()
+                all_dispositions = disp_counts.index.tolist()
+            else:
+                top_10 = []
+                all_dispositions = []
+        else:
+            # Fallback to distinct query if no date range
+            agents = [r[0] for r in db.query(models.CallRecord.Agent).distinct().all() if r[0]]
+            campaigns = [r[0] for r in db.query(models.CallRecord.Campaign).distinct().all() if r[0]]
+            statuses = [r[0] for r in db.query(models.CallRecord.Status).distinct().all() if r[0]]
+            
+            disp_query = db.query(models.CallRecord.Disposition, func.count(models.CallRecord.Disposition))\
+                           .group_by(models.CallRecord.Disposition)\
+                           .order_by(func.count(models.CallRecord.Disposition).desc())\
+                           .all()
+            top_10 = [r[0] for r in disp_query[:10] if r[0]]
+            all_dispositions = [r[0] for r in disp_query if r[0]]
     
+    finally:
+        db.close()
+
     return {
         "agents": sorted(agents),
         "campaigns": sorted(campaigns),

@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, Float, JSON, DateTime
+from sqlalchemy import Column, Integer, String, Float, JSON, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from database import Base
+from database import MasterBase, TenantBase
 
-class UploadManifest(Base):
+class UploadManifest(TenantBase):
     __tablename__ = "upload_manifests"
     id = Column(Integer, primary_key=True, index=True)
     filename = Column(String)
@@ -10,7 +11,7 @@ class UploadManifest(Base):
     gross_tickets = Column(Float)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-class CallRecord(Base):
+class CallRecord(TenantBase):
     __tablename__ = "call_records"
     id = Column(Integer, primary_key=True, index=True)
     
@@ -55,10 +56,30 @@ class CallRecord(Base):
     DynamicDid = Column(String)
     DID = Column(String, index=True)
 
-class ProcessedSync(Base):
+class ProcessedSync(TenantBase):
     __tablename__ = "processed_syncs"
     id = Column(Integer, primary_key=True, index=True)
     file_id = Column(String, unique=True, index=True) # Google Drive File ID
     filename = Column(String)
     record_count = Column(Integer)
     synced_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class CampaignGroup(MasterBase):
+    __tablename__ = "campaign_groups"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    description = Column(String)
+    icon = Column(String, default="phone-incoming")
+    status = Column(String, default="Live")
+    
+    # Relationships
+    sub_campaigns = relationship("SubCampaign", back_populates="parent", cascade="all, delete-orphan")
+
+class SubCampaign(MasterBase):
+    __tablename__ = "sub_campaigns"
+    id = Column(Integer, primary_key=True, index=True)
+    parent_id = Column(Integer, ForeignKey("campaign_groups.id"))
+    ozonetel_name = Column(String, index=True)
+    
+    # Relationships
+    parent = relationship("CampaignGroup", back_populates="sub_campaigns")
